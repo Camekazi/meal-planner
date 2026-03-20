@@ -595,6 +595,7 @@
   </div>
 </header>
 
+<div id="saveBanner" style="display:none;background:#fef2f2;color:#b91c1c;padding:0.4rem 1rem;font-size:0.8rem;text-align:center;border-bottom:1px solid #fca5a5"></div>
 <div class="api-bar" id="apiBar">
   <label for="apiKeyInput">Claude API key</label>
   <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
@@ -803,7 +804,13 @@ function load() {
 }
 
 function save() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    // Storage quota exceeded or private browsing — surface to user once
+    const banner = document.getElementById('saveBanner');
+    if (banner) { banner.textContent = '⚠️ Could not save — storage full or unavailable'; banner.style.display = ''; }
+  }
 }
 
 /* ============================================================
@@ -1229,10 +1236,11 @@ document.getElementById('saveApiKeyBtn').addEventListener('click', () => {
 let modalPhoto = null;  // base64 data URL
 
 function compressImage(file) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
+    const objUrl = URL.createObjectURL(file);
     img.onload = () => {
       const maxSize = 1600;
       let w = img.width, h = img.height;
@@ -1240,9 +1248,11 @@ function compressImage(file) {
       else if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
       canvas.width = w; canvas.height = h;
       ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(objUrl);  // ★ revoke immediately after draw — prevents memory leak
       resolve(canvas.toDataURL('image/jpeg', 0.82));
     };
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error('Image failed to load')); };
+    img.src = objUrl;
   });
 }
 
@@ -1260,7 +1270,9 @@ function handleModalPhoto(file) {
     document.getElementById('noKeyNote').style.display = getApiKey() ? 'none' : '';
   };
   if (file.size > 4 * 1024 * 1024) {
-    compressImage(file).then(process);
+    compressImage(file).then(process).catch(() => {
+      document.getElementById('photoHint').textContent = 'Could not read image — try a different file';
+    });
   } else {
     const reader = new FileReader();
     reader.onload = e => process(e.target.result);
